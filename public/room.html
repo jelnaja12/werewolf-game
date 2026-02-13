@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Room</title>
+  <link rel="stylesheet" href="style.css">
+  <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+
+<div class="container">
+  <h2>🐺 ห้อง: <span id="roomName"></span></h2>
+  <h3 id="phaseText">สถานะ: waiting</h3>
+  <h3 id="resultText" class="result"></h3>
+
+  <ul id="players"></ul>
+
+  <div id="actionSection"></div>
+
+  <button id="phaseBtn" onclick="nextPhase()">เปลี่ยน Phase</button>
+</div>
+
+<script src="client.js"></script>
+</body>
+</html>

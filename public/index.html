@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Werewolf</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="container">
+  <h1>🐺 Werewolf Game</h1>
+
+  <input id="username" placeholder="ชื่อ">
+  <input id="room" placeholder="รหัสห้อง">
+  <br>
+  <button onclick="join()">เข้าเล่น</button>
+</div>
+
+<script>
+function join() {
+  const username = document.getElementById("username").value;
+  const room = document.getElementById("room").value;
+
+  if (!username || !room) return alert("กรอกข้อมูลก่อน");
+
+  localStorage.setItem("username", username);
+  localStorage.setItem("room", room);
+  window.location = "room.html";
+}
+</script>
+
+</body>
+</html>
