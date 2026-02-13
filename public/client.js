@@ -1,148 +1,92 @@
 const socket = io();
-
-const username = localStorage.getItem("username");
-const roomId = localStorage.getItem("room");
-
+let roomId = localStorage.getItem("roomId");
+let username = localStorage.getItem("username");
 let myRole = null;
-let players = [];
-let phase = "waiting";
-let hostId = null;
 
-document.getElementById("roomName").innerText = roomId;
+function createRoom() {
+  username = document.getElementById("username").value;
+  roomId = document.getElementById("roomId").value;
 
-socket.emit("joinRoom", { roomId, username });
+  localStorage.setItem("username", username);
+  localStorage.setItem("roomId", roomId);
 
-socket.on("updatePlayers", (data) => {
-  players = data;
-  render();
-});
+  socket.emit("createRoom", { roomId, username });
+  window.location = "room.html";
+}
 
-socket.on("hostUpdate", (id) => {
-  hostId = id;
-  render();
-});
+function joinRoom() {
+  username = document.getElementById("username").value;
+  roomId = document.getElementById("roomId").value;
 
-function render() {
-  const list = document.getElementById("players");
-  list.innerHTML = "";
+  localStorage.setItem("username", username);
+  localStorage.setItem("roomId", roomId);
 
-  players.forEach(p => {
-    const li = document.createElement("li");
-    let text = p.username;
-    if (p.id === hostId) text += " 👑";
-    if (!p.alive) text += " (ตาย)";
-    li.innerText = text;
-    list.appendChild(li);
+  socket.emit("joinRoom", { roomId, username });
+  window.location = "room.html";
+}
+
+if (window.location.pathname.includes("room.html")) {
+
+  socket.emit("joinRoom", { roomId, username });
+
+  document.getElementById("startBtn").onclick = () => {
+    socket.emit("startGame", roomId);
+  };
+
+  document.getElementById("phaseBtn").onclick = () => {
+    socket.emit("changePhase", roomId);
+  };
+
+  socket.on("yourRole", role => {
+    myRole = role;
+    alert("บทบาทของคุณคือ: " + role);
   });
 
-  renderActions();
-  renderHostButton();
-}
+  socket.on("updateRoom", room => {
+    document.getElementById("roomTitle").innerText = "ห้อง: " + roomId;
+    document.getElementById("phaseText").innerText = "ตอนนี้: " + room.phase;
 
-function renderHostButton() {
-  const btn = document.getElementById("phaseBtn");
-  if (!btn) return;
+    const div = document.getElementById("players");
+    div.innerHTML = "";
 
-  if (socket.id === hostId) {
-    btn.style.display = "inline-block";
-  } else {
-    btn.style.display = "none";
-  }
-}
-
-function renderActions() {
-  const div = document.getElementById("actionSection");
-  div.innerHTML = "";
-
-  const me = players.find(p => p.username === username);
-  if (!me || !me.alive) return;
-
-  if (phase === "night" && myRole === "wolf") {
-    players.forEach(p => {
-      if (p.alive && p.username !== username) {
-        const btn = document.createElement("button");
-        btn.innerText = "ฆ่า " + p.username;
-        btn.onclick = () => {
-          socket.emit("wolfKill", { roomId, targetId: p.id });
-        };
-        div.appendChild(btn);
-      }
-    });
-  }
-
-  if (phase === "day") {
-
-  let voted = false;
-
-  players.forEach(p => {
-    if (p.alive && p.username !== username) {
+    room.players.forEach(p => {
       const btn = document.createElement("button");
-      btn.innerText = "โหวต " + p.username;
-      btn.onclick = () => {
-        if (voted) return;
-        voted = true;
-        socket.emit("vote", { roomId, targetId: p.id });
-      };
+      btn.innerText = p.username + (p.alive ? "" : " (ตาย)");
+      btn.disabled = !p.alive;
+
+      if (room.phase === "night" && myRole === "wolf" && p.alive && p.username !== username) {
+        btn.onclick = () => {
+          socket.emit("kill", { roomId, target: p.username });
+          lockButtons();
+        };
+      }
+
+      if (room.phase === "day" && p.alive) {
+        btn.onclick = () => {
+          socket.emit("vote", { roomId, target: p.username });
+          lockButtons();
+        };
+      }
+
       div.appendChild(btn);
+    });
+
+    if (room.phase === "day") {
+      const noBtn = document.createElement("button");
+      noBtn.innerText = "No Vote";
+      noBtn.onclick = () => {
+        socket.emit("vote", { roomId, target: "novote" });
+        lockButtons();
+      };
+      div.appendChild(noBtn);
     }
   });
 
-  // 🔥 ปุ่มไม่โหวต
-  const noBtn = document.createElement("button");
-  noBtn.innerText = "ไม่โหวต";
-  noBtn.onclick = () => {
-    if (voted) return;
-    voted = true;
-    socket.emit("vote", { roomId, targetId: "noVote" });
-  };
-  div.appendChild(noBtn);
+  socket.on("alertMessage", msg => alert(msg));
+  socket.on("playerKilled", msg => alert(msg + " ถูกฆ่า"));
+  socket.on("playerExecuted", msg => alert(msg + " ถูกโหวตออก"));
 }
 
-}
-
-socket.on("yourRole", (role) => {
-  myRole = role;
-  alert("บทบาทของคุณคือ: " + role);
-});
-
-socket.on("phaseChange", (p) => {
-  phase = p;
-  document.getElementById("phaseText").innerText = "ตอนนี้คือ: " + p;
-  renderActions();
-});
-
-socket.on("playerDied", (name) => {
-  alert(name + " ถูกหมาป่าฆ่า!");
-});
-
-socket.on("playerExecuted", (name) => {
-  alert(name + " ถูกโหวตประหาร!");
-});
-
-socket.on("killLocked", () => {
-  const div = document.getElementById("actionSection");
-  div.innerHTML = "<p>คุณเลือกเหยื่อแล้ว</p>";
-});
-
-socket.on("alertMessage", (msg) => {
-  alert(msg);
-});
-
-socket.on("gameOver", (msg) => {
-  alert(msg); // 🔥 เหลือแค่แจ้งเตือน
-  myRole = null;
-  phase = "waiting";
-  document.getElementById("resultText").innerText = "";
-});
-
-socket.on("voteLocked", () => {
-  const div = document.getElementById("actionSection");
-  div.innerHTML = "<p>คุณโหวตแล้ว</p>";
-});
-
-
-
-
-function nextPhase() {
-  socket.emit("nextPhase", roomId);
+function lockButtons() {
+  document.querySelectorAll("button").forEach(b => b.disabled = true);
 }

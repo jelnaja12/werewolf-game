@@ -3,22 +3,17 @@
 <head>
   <title>Room</title>
   <link rel="stylesheet" href="style.css">
-  <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
+  <h2 id="roomTitle"></h2>
+  <h3 id="phaseText"></h3>
 
-<div class="container">
-  <h2>🐺 ห้อง: <span id="roomName"></span></h2>
-  <h3 id="phaseText">สถานะ: waiting</h3>
-  <h3 id="resultText" class="result"></h3>
+  <div id="players"></div>
 
-  <ul id="players"></ul>
+  <button id="startBtn">เริ่มเกม</button>
+  <button id="phaseBtn">เปลี่ยน Phase</button>
 
-  <div id="actionSection"></div>
-
-  <button id="phaseBtn" onclick="nextPhase()">เปลี่ยน Phase</button>
-</div>
-
-<script src="client.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>

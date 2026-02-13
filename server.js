@@ -10,66 +10,18 @@ app.use(express.static("public"));
 
 let rooms = {};
 
-function assignRoles(players) {
-  let roles = [];
-  const wolfCount = Math.floor(players.length / 4) || 1;
-
-  for (let i = 0; i < wolfCount; i++) roles.push("wolf");
-  while (roles.length < players.length) roles.push("villager");
-
-  roles.sort(() => Math.random() - 0.5);
-
-  players.forEach((p, i) => {
-    p.role = roles[i];
-    p.alive = true;
-  });
-}
-
-function resetRoom(room) {
-  room.phase = "waiting";
-  room.killTarget = null;
-  room.votes = {};
-
-  room.players.forEach(p => {
-    p.role = null;
-    p.alive = true;
-  });
-}
-
-function checkWin(room, roomId) {
-  const alive = room.players.filter(p => p.alive);
-  const wolves = alive.filter(p => p.role === "wolf");
-  const villagers = alive.filter(p => p.role === "villager");
-
-  if (wolves.length === 0 && room.phase !== "waiting") {
-    io.to(roomId).emit("gameOver", "ชาวบ้านชนะ!");
-    resetRoom(room);
-    io.to(roomId).emit("phaseChange", "waiting");
-    io.to(roomId).emit("updatePlayers", room.players);
-  }
-  else if (wolves.length >= villagers.length && room.phase !== "waiting") {
-    io.to(roomId).emit("gameOver", "หมาป่าชนะ!");
-    resetRoom(room);
-    io.to(roomId).emit("phaseChange", "waiting");
-    io.to(roomId).emit("updatePlayers", room.players);
-  }
-}
-
 io.on("connection", (socket) => {
 
-  socket.on("joinRoom", ({ roomId, username }) => {
+  socket.on("createRoom", ({ roomId, username }) => {
+    rooms[roomId] = {
+      host: socket.id,
+      phase: "waiting",
+      players: [],
+      votes: {},
+      wolfKilled: false
+    };
+
     socket.join(roomId);
-
-    if (!rooms[roomId]) {
-      rooms[roomId] = {
-        players: [],
-        phase: "waiting",
-        killTarget: null,
-        votes: {},
-        hostId: socket.id
-      };
-    }
-
     rooms[roomId].players.push({
       id: socket.id,
       username,
@@ -77,118 +29,172 @@ io.on("connection", (socket) => {
       alive: true
     });
 
-    io.to(roomId).emit("updatePlayers", rooms[roomId].players);
-    io.to(roomId).emit("hostUpdate", rooms[roomId].hostId);
+    socket.emit("roomCreated", roomId);
+    io.to(roomId).emit("updateRoom", rooms[roomId]);
   });
 
-  socket.on("wolfKill", ({ roomId, targetId }) => {
-    const room = rooms[roomId];
-    if (!room || room.phase !== "night") return;
-
-    const player = room.players.find(p => p.id === socket.id);
-    if (!player || player.role !== "wolf" || !player.alive) return;
-
-    if (room.killTarget) return; // 🔒 ฆ่าได้ครั้งเดียว
-
-    room.killTarget = targetId;
-    io.to(socket.id).emit("killLocked"); // ล็อคปุ่ม
-  });
-
-  socket.on("vote", ({ roomId, targetId }) => {
-  const room = rooms[roomId];
-  if (!room || room.phase !== "day") return;
-
-  const voter = room.players.find(p => p.id === socket.id);
-  if (!voter || !voter.alive) return;
-
-  if (room.votes[socket.id]) return; // 🔒 โหวตได้ครั้งเดียว
-
-  room.votes[socket.id] = targetId;
-  io.to(socket.id).emit("voteLocked");
-});
-
-
-  socket.on("nextPhase", (roomId) => {
+  socket.on("joinRoom", ({ roomId, username }) => {
     const room = rooms[roomId];
     if (!room) return;
 
-    if (socket.id !== room.hostId) return;
+    socket.join(roomId);
+    room.players.push({
+      id: socket.id,
+      username,
+      role: null,
+      alive: true
+    });
 
-    if (room.phase === "waiting") {
-      assignRoles(room.players);
-      room.phase = "night";
+    io.to(roomId).emit("updateRoom", room);
+  });
 
-      room.players.forEach(p => {
-        io.to(p.id).emit("yourRole", p.role);
-      });
+  socket.on("startGame", (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
 
-      io.to(roomId).emit("phaseChange", "night");
+    const players = room.players;
+    const wolfIndex = Math.floor(Math.random() * players.length);
+    players.forEach((p, i) => {
+      p.role = i === wolfIndex ? "wolf" : "villager";
+    });
+
+    room.phase = "night";
+    room.wolfKilled = false;
+
+    players.forEach(p => {
+      io.to(p.id).emit("yourRole", p.role);
+    });
+
+    io.to(roomId).emit("updateRoom", room);
+  });
+
+  socket.on("changePhase", (roomId) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    if (room.host !== socket.id) return;
+
+    if (room.phase === "night" && !room.wolfKilled) {
+      io.to(roomId).emit("alertMessage", "หมาป่ายังไม่ได้ฆ่า");
       return;
     }
 
-    // 🔥 night → day ต้องมีการฆ่าก่อน
-    if (room.phase === "night") {
-
-      if (!room.killTarget) {
-        io.to(socket.id).emit("alertMessage", "หมาป่ายังไม่ได้เลือกฆ่า!");
-        return;
-      }
-
-      room.phase = "day";
-
-      const victim = room.players.find(p => p.id === room.killTarget);
-      if (victim) victim.alive = false;
-
-      io.to(roomId).emit("playerDied", victim?.username);
-      room.killTarget = null;
+    if (room.phase === "day") {
+      calculateVotes(roomId);
     }
 
-  else if (room.phase === "day") {
+    room.phase =
+      room.phase === "night"
+        ? "day"
+        : room.phase === "day"
+        ? "night"
+        : "night";
 
-  if (Object.keys(room.votes).length === 0) {
-    io.to(socket.id).emit("alertMessage", "ยังไม่มีใครโหวต!");
+    room.votes = {};
+    room.wolfKilled = false;
+
+    io.to(roomId).emit("updateRoom", room);
+  });
+
+  socket.on("kill", ({ roomId, target }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    const killer = room.players.find(p => p.id === socket.id);
+    if (!killer || killer.role !== "wolf" || room.phase !== "night") return;
+
+    const victim = room.players.find(p => p.username === target);
+    if (!victim || !victim.alive) return;
+
+    victim.alive = false;
+    room.wolfKilled = true;
+
+    io.to(roomId).emit("playerKilled", victim.username);
+    checkWin(roomId);
+  });
+
+  socket.on("vote", ({ roomId, target }) => {
+    const room = rooms[roomId];
+    if (!room) return;
+
+    room.votes[socket.id] = target;
+  });
+
+});
+
+function calculateVotes(roomId) {
+  const room = rooms[roomId];
+  if (!room) return;
+
+  const voteCount = {};
+
+  Object.values(room.votes).forEach(v => {
+    if (!voteCount[v]) voteCount[v] = 0;
+    voteCount[v]++;
+  });
+
+  let max = 0;
+  let top = [];
+
+  for (let key in voteCount) {
+    if (voteCount[key] > max) {
+      max = voteCount[key];
+      top = [key];
+    } else if (voteCount[key] === max) {
+      top.push(key);
+    }
+  }
+
+  if (max === 0) {
+    io.to(roomId).emit("alertMessage", "ไม่มีการโหวต");
     return;
   }
 
-  room.phase = "night";
-
-  const count = {};
-  Object.values(room.votes).forEach(id => {
-    count[id] = (count[id] || 0) + 1;
-  });
-
-  let maxVotes = 0;
-  let executedId = null;
-
-  for (let id in count) {
-    if (count[id] > maxVotes) {
-      maxVotes = count[id];
-      executedId = id;
-    }
+  if (top.length > 1) {
+    io.to(roomId).emit("alertMessage", "คะแนนเสมอ ไม่มีใครตาย");
+    return;
   }
 
-  if (executedId && executedId !== "noVote") {
-    const victim = room.players.find(p => p.id === executedId);
-    if (victim) victim.alive = false;
-    io.to(roomId).emit("playerExecuted", victim?.username);
-  } else {
-    io.to(roomId).emit("alertMessage", "ไม่มีใครถูกประหาร");
+  if (top[0] === "novote") {
+    io.to(roomId).emit("alertMessage", "No Vote มากสุด ไม่มีใครตาย");
+    return;
   }
 
-  room.votes = {};
+  const victim = room.players.find(p => p.username === top[0]);
+  if (victim) {
+    victim.alive = false;
+    io.to(roomId).emit("playerExecuted", victim.username);
+  }
+
+  checkWin(roomId);
 }
 
-    checkWin(room, roomId);
+function checkWin(roomId) {
+  const room = rooms[roomId];
+  const wolves = room.players.filter(p => p.role === "wolf" && p.alive);
+  const villagers = room.players.filter(p => p.role === "villager" && p.alive);
 
-    io.to(roomId).emit("phaseChange", room.phase);
-    io.to(roomId).emit("updatePlayers", room.players);
+  if (wolves.length === 0) {
+    io.to(roomId).emit("alertMessage", "ชาวบ้านชนะ!");
+    resetGame(roomId);
+  }
+
+  if (wolves.length >= villagers.length) {
+    io.to(roomId).emit("alertMessage", "หมาป่าชนะ!");
+    resetGame(roomId);
+  }
+}
+
+function resetGame(roomId) {
+  const room = rooms[roomId];
+  room.phase = "waiting";
+  room.players.forEach(p => {
+    p.role = null;
+    p.alive = true;
   });
+  room.votes = {};
+  room.wolfKilled = false;
+  io.to(roomId).emit("updateRoom", room);
+}
 
-});
-
-const PORT = process.env.PORT || 3000;
-
-server.listen(PORT, () => {
-  console.log("Server running");
-});
-
+server.listen(3000);

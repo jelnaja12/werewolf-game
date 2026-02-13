@@ -5,28 +5,15 @@
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
-
-<div class="container">
-  <h1>🐺 Werewolf Game</h1>
+  <h1>Werewolf Game</h1>
 
   <input id="username" placeholder="ชื่อ">
-  <input id="room" placeholder="รหัสห้อง">
-  <br>
-  <button onclick="join()">เข้าเล่น</button>
-</div>
+  <input id="roomId" placeholder="รหัสห้อง">
 
-<script>
-function join() {
-  const username = document.getElementById("username").value;
-  const room = document.getElementById("room").value;
+  <button onclick="createRoom()">สร้างห้อง</button>
+  <button onclick="joinRoom()">เข้าห้อง</button>
 
-  if (!username || !room) return alert("กรอกข้อมูลก่อน");
-
-  localStorage.setItem("username", username);
-  localStorage.setItem("room", room);
-  window.location = "room.html";
-}
-</script>
-
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
 </body>
 </html>
